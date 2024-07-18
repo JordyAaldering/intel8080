@@ -7,39 +7,35 @@ pub struct Memory {
     ///
     /// 16-bit program counter register (PCH and PCl are used to refer
     /// to the high-order and low-order 8 bits respectively).
-    pc: u16,
+    pub pc: u16,
     /// ### Stack Pointer
     ///
     /// 16-bit stack pointer register (SPH and SPL are used to refer
     /// to the high-order and low-order 8 bits respectively).
-    sp: u16,
+    pub sp: u16,
     mem: Vec<u8>,
 }
 
 impl Memory {
     pub fn from_reader<T: Read>(reader: &mut BufReader<T>) -> std::io::Result<Self> {
-        let mut buf = Vec::with_capacity(0xFFFF);
+        let mut buf = Vec::with_capacity(0xFFFF + 1);
         let _ = reader.read_to_end(&mut buf)?;
-        buf.resize(0xFFFF, 0);
+        buf.resize(0xFFFF + 1, 0);
         Ok(Memory { pc: 0, sp: 0, mem: buf })
-    }
-
-    pub fn get_pc(&self) -> (u8, u8) {
-        let rh = (self.pc >> 8) as u8;
-        let rl = (self.pc >> 0) as u8;
-        (rh, rl)
     }
 
     pub fn set_sp(&mut self, rh: u8, rl: u8) {
         self.sp = ((rh as u16) << 8) | (rl as u16)
     }
 
-    pub fn inc_pc(&mut self) {
-        self.pc = self.pc.wrapping_add(1);
+    pub fn set_pc(&mut self, rh: u8, rl: u8) {
+        self.pc = ((rh as u16) << 8) | (rl as u16)
     }
 
-    pub fn dec_pc(&mut self) {
-        self.pc = self.pc.wrapping_sub(1);
+    pub fn get_pc(&self) -> (u8, u8) {
+        let rh = (self.pc >> 8) as u8;
+        let rl = (self.pc >> 0) as u8;
+        (rh, rl)
     }
 
     pub fn read_pc8(&mut self) -> u8 {
@@ -58,22 +54,6 @@ impl Memory {
         let res = self.mem[self.sp as usize];
         self.sp += 1;
         res
-    }
-
-    pub fn read_sp16(&mut self) -> u16 {
-        let rl = self.read_sp8();
-        let rh = self.read_sp8();
-        ((rh as u16) << 8) | (rl as u16)
-    }
-
-    pub fn write_sp8(&mut self, value: u8) {
-        self.mem[self.sp as usize] = value;
-        self.sp += 1;
-    }
-
-    pub fn write_sp16(&mut self, value: u16) {
-        self.write_sp8((value >> 8) as u8);
-        self.write_sp8((value >> 0) as u8);
     }
 
     pub fn jump(&mut self, adr: u16, cond: bool) {
@@ -99,6 +79,12 @@ impl Memory {
             self.pc = adr;
             self.sp += 2;
         }
+    }
+
+    pub fn push(&mut self, rh: u8, rl: u8) {
+        self.mem[self.sp as usize - 1] = rh;
+        self.mem[self.sp as usize - 2] = rl;
+        self.sp -= 2;
     }
 
     pub fn read_opcode(&mut self) -> Opcode {
@@ -296,11 +282,11 @@ impl Memory {
             0xbe => Opcode::CMP_M,
             0xbf => Opcode::CMP_A,
             0xc0 => Opcode::RNZ,
-            0xc1 => Opcode::POP_B,
+            0xc1 => Opcode::POP_BC,
             0xc2 => Opcode::JNZ(self.read_pc16()),
             0xc3 => Opcode::JMP(self.read_pc16()),
             0xc4 => Opcode::CNZ(self.read_pc16()),
-            0xc5 => Opcode::PUSH_B,
+            0xc5 => Opcode::PUSH_BC,
             0xc6 => Opcode::ADI(self.read_pc8()),
             0xc7 => Opcode::RST_0,
             0xc8 => Opcode::RZ,
@@ -312,11 +298,11 @@ impl Memory {
             0xce => Opcode::ACI(self.read_pc8()),
             0xcf => Opcode::RST_1,
             0xd0 => Opcode::RNC,
-            0xd1 => Opcode::POP_D,
+            0xd1 => Opcode::POP_DE,
             0xd2 => Opcode::JNC(self.read_pc16()),
             0xd3 => Opcode::OUT(self.read_pc8()),
             0xd4 => Opcode::CNC(self.read_pc16()),
-            0xd5 => Opcode::PUSH_D,
+            0xd5 => Opcode::PUSH_DE,
             0xd6 => Opcode::SUI(self.read_pc8()),
             0xd7 => Opcode::RST_2,
             0xd8 => Opcode::RC,
@@ -328,11 +314,11 @@ impl Memory {
             0xde => Opcode::SBI(self.read_pc8()),
             0xdf => Opcode::RST_3,
             0xe0 => Opcode::RPO,
-            0xe1 => Opcode::POP_H,
+            0xe1 => Opcode::POP_HL,
             0xe2 => Opcode::JPO(self.read_pc16()),
             0xe3 => Opcode::XTHL,
             0xe4 => Opcode::CPO(self.read_pc16()),
-            0xe5 => Opcode::PUSH_H,
+            0xe5 => Opcode::PUSH_HL,
             0xe6 => Opcode::ANI(self.read_pc8()),
             0xe7 => Opcode::RST_4,
             0xe8 => Opcode::RPE,

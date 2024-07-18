@@ -570,7 +570,7 @@ fn emulate(reg: &mut Registers, flags: &mut Flags, mem: &mut Memory) {
             reg.h = reg.h.wrapping_add(1 + cy as u8);
             reg.l = l;
         },
-        Opcode::INX_SP => mem.inc_pc(),
+        Opcode::INX_SP => mem.pc = mem.pc.wrapping_add(1),
 
         // DCX rp (Decrement register pair)
         //   (rh) (rl) ← (rh) (rl) - 1
@@ -596,7 +596,7 @@ fn emulate(reg: &mut Registers, flags: &mut Flags, mem: &mut Memory) {
             reg.h = reg.h.wrapping_add(1 + cy as u8);
             reg.l = l;
         },
-        Opcode::DCX_SP => mem.dec_pc(),
+        Opcode::DCX_SP => mem.pc = mem.pc.wrapping_sub(1),
 
         // DAD rp (Add register pair to H and L)
         //   (H) (L) ← (H) (L) + (rh) (rl)
@@ -612,30 +612,34 @@ fn emulate(reg: &mut Registers, flags: &mut Flags, mem: &mut Memory) {
         // Flags: CY
         Opcode::DAD_BC => {
             let (l, cy) = reg.l.overflowing_add(reg.b);
-            let (h, cy) = reg.h.overflowing_add(reg.c + cy as u8);
-            flags.carry = cy;
+            let (h, cy1) = reg.h.overflowing_add(cy as u8);
+            let (h, cy2) = h.overflowing_add(reg.c);
+            flags.carry = cy1 | cy2;
             reg.l = l;
             reg.h = h;
         },
         Opcode::DAD_DE => {
             let (l, cy) = reg.l.overflowing_add(reg.d);
-            let (h, cy) = reg.h.overflowing_add(reg.e + cy as u8);
-            flags.carry = cy;
+            let (h, cy1) = reg.h.overflowing_add(cy as u8);
+            let (h, cy2) = h.overflowing_add(reg.e);
+            flags.carry = cy1 | cy2;
             reg.l = l;
             reg.h = h;
         },
         Opcode::DAD_HL => {
             let (l, cy) = reg.l.overflowing_add(reg.h);
-            let (h, cy) = reg.h.overflowing_add(reg.l + cy as u8);
-            flags.carry = cy;
+            let (h, cy1) = reg.h.overflowing_add(cy as u8);
+            let (h, cy2) = h.overflowing_add(reg.l);
+            flags.carry = cy1 | cy2;
             reg.l = l;
             reg.h = h;
         },
         Opcode::DAD_SP => {
             let (rh, rl) = mem.get_pc();
             let (l, cy) = reg.l.overflowing_add(rh);
-            let (h, cy) = reg.h.overflowing_add(rl + cy as u8);
-            flags.carry = cy;
+            let (h, cy1) = reg.h.overflowing_add(cy as u8);
+            let (h, cy2) = h.overflowing_add(rl);
+            flags.carry = cy1 | cy2;
             reg.l = l;
             reg.h = h;
         },
@@ -1111,55 +1115,209 @@ fn emulate(reg: &mut Registers, flags: &mut Flags, mem: &mut Memory) {
         // Cycles: 1
         // States: 5
         // Addressing: register
-        Opcode::PCHL => todo!(),
-
-
-
-
-
-
+        Opcode::PCHL => mem.set_pc(reg.h, reg.l),
 
         //
-        // TODO
+        // Stack, I/O, and machine control group
         //
-        Opcode::NOP => { std::thread::sleep(std::time::Duration::from_secs_f64(0.1))},
-        Opcode::HLT => exit(0),
-        Opcode::POP_B => {
+        // This group of instructions performs I/O, manipulates the Stack,
+        // and alters internal control flags. Unless otherwise specified,
+        // condition flags are not affected by any instructions in this group.
+        //
+
+        // PUSH rp (Push)
+        //   ((SP) - 1) ← (rh)
+        //   ((SP) - 2) ← (rl)
+        //   (SP) ← (SP) - 2
+        //   The content of the high-order register of register pair rp is
+        //   moved to the memory location whose address is one less than the
+        //   content of register SP. The content of the low-order register of
+        //   register pair rp is moved to the memory location whose address
+        //   is two less than the content of register SP. The content of
+        //   register SP is decremented by 2.
+        //   Note: Register pair rp = SP may not be specified.
+        //
+        // Cycles: 3
+        // States: 11
+        // Addressing: register indirect
+        // Flags: none
+        Opcode::PUSH_BC => mem.push(reg.b, reg.c),
+        Opcode::PUSH_DE => mem.push(reg.d, reg.e),
+        Opcode::PUSH_HL => mem.push(reg.h, reg.l),
+
+        // PUSH PSW (Push processor status word)
+        //   ((SP) - 1) ← (A)
+        //   ((SP) - 2)_0 ← (CY), ((SP) - 2)_1 ← 1
+        //   ((SP) - 2)_2 ← (P),  ((SP) - 2)_3 ← 0
+        //   ((SP) - 2)_4 ← (AC), ((SP) - 2)_5 ← 0
+        //   ((SP) - 2)_6 ← (Z),  ((SP) - 2)_7 ← (S)
+        //   (SP) ← (SP) - 2
+        //   The content of register A is moved to the memory location
+        //   whose address is one less than register SP. The contents of
+        //   the condition flags are assembled into a processor status word
+        //   and the word is moved to the memory location whose address is
+        //   two less than the content of register SP. The content of
+        //   register SP is decremented by two.
+        //
+        // Flag word:
+        //   S Z 0 AC 0 P 1 CY
+        //  MSB             LSB
+        //
+        // Cycles: 3
+        // States: 11
+        // Addressing: register indirect
+        // Flags: none
+        Opcode::PUSH_PSW => {
+            let sp = mem.sp;
+            mem[sp - 1] = reg.a;
+
+            let mut psw = 0b0100_0000;
+            psw |= 0b1000_0000 * (flags.sign as u8);
+            psw |= 0b0100_0000 * (flags.zero as u8);
+            psw |= 0b0001_0000 * (flags.carry_aux as u8);
+            psw |= 0b0000_0100 * (flags.parity as u8);
+            psw |= 0b0000_0001 * (flags.carry as u8);
+            mem[sp - 2] = psw;
+            mem.sp -= 2;
+        },
+
+        // POP rp (Pop)
+        //   (rl) ← ((SP))
+        //   (rh) ← ((SP) + 1)
+        //   (SP) ← (SP) + 2
+        //   The content of the memory location, whose address is specified by
+        //   the content of register SP, is moved to the low-order register
+        //   of register pair rp. The content of the memory location, whose
+        //   address is one more than the content of register SP, is moved
+        //   to the high-order register of register pair rp. The content
+        //   of register SP is incremented by 2.
+        //   Note: Register pair rp = SP may not be specified.
+        //
+        // Cycles: 3
+        // States: 10
+        // Addressing: register indirect
+        // Flags: none
+        Opcode::POP_BC => {
             reg.c = mem.read_sp8();
             reg.b = mem.read_sp8();
         },
-        Opcode::PUSH_B => {
-            mem.write_sp8(reg.b);
-            mem.write_sp8(reg.c);
+        Opcode::POP_DE => {
+            reg.e = mem.read_sp8();
+            reg.d = mem.read_sp8();
         },
-        Opcode::POP_D => todo!(),
-        Opcode::OUT(d8) => println!("OUT {}", d8),
-        Opcode::PUSH_D => todo!(),
-        Opcode::IN(d8) => println!("IN {}", d8),
-        Opcode::POP_H => todo!(),
-        Opcode::XTHL => todo!(),
-        Opcode::PUSH_H => todo!(),
+        Opcode::POP_HL => {
+            reg.l = mem.read_sp8();
+            reg.h = mem.read_sp8();
+        },
+
+        // POP PSW (Pop processor status word)
+        //   (CY) ← ((SP))_O
+        //   (P)  ← ((SP))_2
+        //   (AC) ← ((SP))_4
+        //   (Z)  ← ((SP))_6
+        //   (S)  ← ((SP))_7
+        //   (A)  ← ((SP) + 1)
+        //   (SP) ← (SP) + 2
+        //   The content of the memory location whose address is specified
+        //   by the content of register SP is used to restore the condition
+        //   flags. The content of the memory location whose address is one
+        //   more than the content of register SP is moved to register A.
+        //   The content of register SP is incremented by 2.
+        //
+        // Cycles: 3
+        // States: 10
+        // Addressing: register indirect
+        // Flags: Z, S, P, CY, AC
         Opcode::POP_PSW => {
             let psw = mem.read_sp8();
-            flags.zero      = 0b0001 == (psw & 0b0001);
-            flags.sign      = 0b0010 == (psw & 0b0010);
-            flags.parity    = 0b0100 == (psw & 0b0100);
-            flags.carry     = 0b1000 == (psw & 0b1000);
-            flags.carry_aux = 0b1010 == (psw & 0b1010);
+            flags.sign      = (0b1000_0000 & psw) > 0;
+            flags.zero      = (0b0100_0000 & psw) > 0;
+            flags.carry_aux = (0b0001_0000 & psw) > 0;
+            flags.parity    = (0b0000_0100 & psw) > 0;
+            flags.carry     = (0b0000_0001 & psw) > 0;
             reg.a = mem.read_sp8();
         },
-        Opcode::DI => flags.interrupt_enabled = false,
-        Opcode::PUSH_PSW => {
-            mem.write_sp8(reg.a);
-            let psw = flags.zero as u8
-                    | (flags.sign as u8) << 1
-                    | (flags.parity as u8) << 2
-                    | (flags.carry as u8) << 3
-                    | (flags.carry_aux as u8) << 4;
-            mem.write_sp8(psw);
-        },
+
+        // XTHL (Exchange stack top with H and L)
+        //   (L) ← ((SP))
+        //   (H) ← ((SP) + 1)
+        //   The content of the L register is exchanged with the content of
+        //   the memory location whose address is specified by the content of
+        //   register SP. The content of the H register is exchanged with the
+        //   content of the memory location whose address is one more than
+        //   the content of register SP.
+        //
+        // Cycles: 5
+        // States: 18
+        // Addressing: register indirect
+        // Flags: none
+        Opcode::XTHL => todo!(),
+
+        // SPHL (Move HL to SP)
+        //   (SP) ← (H) (L)
+        //   The contents of registers H and L are moved to register SP.
+        //
+        // Cycles: 1
+        // States: 5
+        // Addressing: register
+        // Flags: none
         Opcode::SPHL => todo!(),
+
+        // IN port (Input)
+        //   (A) ← (data)
+        //   The data placed on the eight bit bi-directional data bus
+        //   by the specified port is moved to register A.
+        //
+        // Cycles: 3
+        // States: 10
+        // Addressing: direct
+        // Flags: none
+        Opcode::IN(d8) => println!("IN {}", d8),
+
+        // OUT port (Output)
+        //   (data) ← (A)
+        //   The content of register A is placed on the eight bit bi-directional
+        //   data bus for transmission to the specified port.
+        //
+        // Cycles: 3
+        // States: 10
+        // Addressing: direct
+        // Flags: none
+        Opcode::OUT(d8) => println!("OUT {}", d8),
+
+        // EI (Enable interrupts)
+        //   The interrupt system is enabled following the
+        //   execution of the next instruction.
+        //
+        // Cycles: 1
+        // States: 4
+        // Flags: none
         Opcode::EI => flags.interrupt_enabled = true,
+
+        // DI (Disable interrupts)
+        //   The interrupt system is disabled immediately
+        //   following the execution of the DI instruction.
+        //
+        // Cycles: 1
+        // States: 4
+        // Flags: none
+        Opcode::DI => flags.interrupt_enabled = false,
+
+        // HLT (Halt)
+        //   The processor is stopped. The registers and flags are unaffected.
+        //
+        // Cycles: 1
+        // States: 7
+        // Flags: none
+        Opcode::HLT => exit(0),
+
+        // NOP (No op)
+        //   No operation is performed. The registers and flags are unaffected.
+        //
+        // Cycles: 1
+        // States: 4
+        // Flags: none
+        Opcode::NOP => {},
     }
 }
 
