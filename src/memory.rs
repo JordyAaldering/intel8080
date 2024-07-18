@@ -3,6 +3,7 @@ use std::io::{BufReader, Read};
 use crate::opcode::Opcode;
 
 pub struct Memory {
+    pub bytes_read: usize,
     /// ### Program Counter
     ///
     /// 16-bit program counter register (PCH and PCl are used to refer
@@ -19,9 +20,9 @@ pub struct Memory {
 impl Memory {
     pub fn from_reader<T: Read>(reader: &mut BufReader<T>) -> std::io::Result<Self> {
         let mut buf = Vec::with_capacity(0xFFFF + 1);
-        let _ = reader.read_to_end(&mut buf)?;
+        let bytes_read = reader.read_to_end(&mut buf)?;
         buf.resize(0xFFFF + 1, 0);
-        Ok(Memory { pc: 0, sp: 0, mem: buf })
+        Ok(Memory { bytes_read, pc: 0, sp: 0, mem: buf })
     }
 
     pub fn set_sp(&mut self, rh: u8, rl: u8) {

@@ -1,4 +1,17 @@
 [package]
 name = "intel8080"
+default-run = "intel8080"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+name = "intel8080"
+path = "src/lib.rs"
+
+[[bin]]
+name = "intel8080"
+path = "src/main.rs"
+
+[[bin]]
+name = "disassemble"
+path = "src/disassemble.rs"
