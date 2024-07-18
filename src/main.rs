@@ -60,9 +60,9 @@ fn cmp(a: u8, value: u8, flags: &mut Flags) {
 }
 
 fn emulate(reg: &mut Registers, flags: &mut Flags, mem: &mut Memory) {
-    print!("{:?}", mem);
+    //let pc = mem.pc;
     let opcode = mem.read_opcode();
-    println!(" | {:?}", opcode);
+    // println!("{:#010x} | {:?}", pc, opcode);
     match opcode {
         //
         // Data transfer group
@@ -1322,7 +1322,8 @@ fn emulate(reg: &mut Registers, flags: &mut Flags, mem: &mut Memory) {
 }
 
 fn main() -> std::io::Result<()> {
-    let file = File::open("roms/invaders")?;
+    let args: Vec<String> = std::env::args().collect();
+    let file = File::open(&args[1])?;
     let mut reader = BufReader::new(file);
     let mut mem = Memory::from_reader(&mut reader)?;
 

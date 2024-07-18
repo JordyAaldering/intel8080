@@ -40,7 +40,7 @@ impl Memory {
 
     pub fn read_pc8(&mut self) -> u8 {
         let res = self.mem[self.pc as usize];
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         res
     }
 
@@ -52,7 +52,7 @@ impl Memory {
 
     pub fn read_sp8(&mut self) -> u8 {
         let res = self.mem[self.sp as usize];
-        self.sp += 1;
+        self.sp = self.sp.wrapping_add(1);
         res
     }
 
@@ -64,9 +64,9 @@ impl Memory {
 
     pub fn call(&mut self, adr: u16, cond: bool) {
         if cond {
-            self.mem[self.sp as usize - 1] = (self.pc >> 8) as u8;
-            self.mem[self.sp as usize - 2] = (self.pc >> 0) as u8;
-            self.sp -= 2;
+            self.mem[self.sp.wrapping_sub(1) as usize] = (self.pc >> 8) as u8;
+            self.mem[self.sp.wrapping_sub(2) as usize] = (self.pc >> 0) as u8;
+            self.sp = self.sp.wrapping_sub(2);
             self.pc = adr;
         }
     }
@@ -82,9 +82,9 @@ impl Memory {
     }
 
     pub fn push(&mut self, rh: u8, rl: u8) {
-        self.mem[self.sp as usize - 1] = rh;
-        self.mem[self.sp as usize - 2] = rl;
-        self.sp -= 2;
+        self.mem[self.sp.wrapping_sub(1) as usize] = rh;
+        self.mem[self.sp.wrapping_sub(2) as usize] = rl;
+        self.sp = self.sp.wrapping_sub(2);
     }
 
     pub fn read_opcode(&mut self) -> Opcode {
@@ -360,11 +360,5 @@ impl std::ops::Index<u16> for Memory {
 impl std::ops::IndexMut<u16> for Memory {
     fn index_mut(&mut self, index: u16) -> &mut u8 {
         &mut self.mem[index as usize]
-    }
-}
-
-impl std::fmt::Debug for Memory {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{:#010x}", self.pc))
     }
 }
